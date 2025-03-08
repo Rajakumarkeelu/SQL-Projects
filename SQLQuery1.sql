@@ -1,0 +1,353 @@
+DROP DATABASE [FinancialTransactions];
+CREATE DATABASE FinancialTransactions;
+USE FinancialTransactions;
+CREATE TABLE transactions_data (
+    id INT,
+    date DATETIME,
+    client_id INT,
+    card_id INT,
+    amount DECIMAL(10,2),
+    use_chip VARCHAR(50),
+    merchant_id INT,
+    merchant_city VARCHAR(100),
+    merchant_state VARCHAR(50),
+    zip VARCHAR(20),
+    mcc INT,
+    errors VARCHAR(255)
+);
+
+ALTER TABLE transactions_data
+ALTER COLUMN errors VARCHAR(4000); -- Increase length
+
+BULK INSERT transactions_data
+FROM 'D:\SQL Practice CSV Files\transactions_data.csv'
+WITH (
+    FIRSTROW = 2,
+    FIELDTERMINATOR = ',',
+    ROWTERMINATOR = '0x0A',  -- Fixes newline issues
+    TABLOCK,
+    KEEPNULLS  -- Treat empty values as NULL instead of failing
+);
+GO
+
+SELECT TOP 10 * FROM transactions_data;
+GO
+
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'transactions_data';
+GO
+
+ALTER TABLE transactions_data
+ADD Remarks NVARCHAR(4000);
+GO
+
+SELECT TOP 20 * FROM transactions_data;
+GO
+
+CREATE TABLE Schema_Change_log (
+ChangeID INT IDENTITY(1,1) PRIMARY KEY,
+ChangeDate DATETIME DEFAULT GETDATE(),
+TableName VARCHAR(100),
+ColumnName VARCHAR(100),
+ChangeType VARCHAR(50),
+Description VARCHAR(4000)
+);
+GO
+ALTER TABLE Schema_Change_log
+ADD ChangedBy VARCHAR(100);
+
+CREATE TRIGGER trg_LogSchemaChanges 
+ON DATABASE 
+FOR DDL_TABLE_EVENTS 
+AS 
+BEGIN
+    INSERT INTO Schema_Change_Log (ChangeDate, TableName, ColumnName, ChangeType, Description, ChangedBy)
+    SELECT 
+        GETDATE(), 
+        EVENTDATA().value('(/EVENT_INSTANCE/ObjectName)[1]', 'VARCHAR(100)'),
+        NULL, -- ColumnName (Not directly available in EVENTDATA for DDL events)
+        EVENTDATA().value('(/EVENT_INSTANCE/EventType)[1]', 'VARCHAR(50)'),
+        EVENTDATA().value('(/EVENT_INSTANCE/TSQLCommand)[1]', 'VARCHAR(4000)'),
+        SUSER_NAME(); -- Logs the SQL user who made the change
+END;
+GO
+
+ALTER TABLE transactions_data ADD TestColumn INT;
+SELECT * FROM Schema_Change_Log ORDER BY ChangeDate DESC;
+SELECT * FROM transactions_data;
+GO
+
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'transactions_data';
+SELECT TOP 10 * FROM transactions_data;
+GO
+
+
+CREATE TABLE OverviewofTransactions (
+Sequence INT PRIMARY KEY IDENTITY(1,1),
+Transaction_Type VARCHAR(50),
+Transaction_Count INT);
+INSERT INTO OverviewofTransactions(Transaction_Type, Transaction_Count)
+SELECT 
+use_chip AS Transaction_Type,
+COUNT (*) AS Transaction_Count
+FROM transactions_data
+GROUP BY use_chip;
+GO
+SELECT * FROM OverviewofTransactions
+ORDER BY Transaction_Count DESc;
+GO
+
+DROP TABLE IF EXISTS OverviewofTransactions;
+
+IF NOT EXISTS
+(SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'OverviewofTransactions'
+)
+BEGIN
+CREATE TABLE OverviewofTransactions(
+Sequence INT PRIMARY KEY IDENTITY(1,1),
+Transaction_Type VARCHAR(50),
+Transaction_Count INT
+);
+END
+
+TRUNCATE TABLE OverviewofTransactions;
+
+INSERT INTO OverviewofTransactions(Transaction_Type, Transaction_Count)
+SELECT
+use_chip AS Transaction_Type, 
+COUNT(*) AS Transaction_Count
+FROM transactions_data
+GROUP BY use_chip;
+
+GO
+
+/******
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+
+******/
+
+SELECT * FROM OverviewofTransactions;
+GO
+
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+
+GO
+
+/******
+to view tables in SSMS unlke in mySQL workbench we have three ways
+-------------------------------------
+1
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'Your database name without gaps';
+--------------------------------------
+2nd one is this
+
+SELECT name FROM sys.tables
+ORDER BY name;
+--------------------------------
+3rd one is this - it is short but it works only on present database
+EXEC sp_tables; // or // EXECUTE sp_tables;
+
+----- to view only tables with this sp_tables is 
+4th one
+EXEC sp_tables @table_type = "'Table'";
+
+******/
+GO
+
+USE FinancialTransactions;
+
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+
+SELECT TOP 10* FROM transactions_data;
+GO
+
+
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'transactions_data';
+
+UPDATE transactions_data
+SET
+	merchant_state = 'To be inserted',
+	zip = '00000.0'
+WHERE merchant_state IS NULL OR zip IS NULL;
+GO
+
+SELECT TOP 50* FROM transactions_data;
+GO
+
+IF NOT EXISTS
+(SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Negative_Transactions')
+BEGIN
+CREATE TABLE Negative_Transactions(
+id int, date datetime, client_id int, card_id int, amount decimal(10, 0), use_chip varchar(50),merchant_id int,
+merchant_city varchar(50), merchant_state varchar(50), zip varchar(50), mcc int, errors varchar(50), Remarks nvarchar(500),
+TestColumn int);
+END
+-- refreshig the table if exists
+IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Negative_Transactions')
+BEGIN
+TRUNCATE TABLE Negative_Transactions;
+END
+
+INSERT INTO Negative_Transactions (id, date, client_id, card_id, amount, use_chip, merchant_id, merchant_city, 
+merchant_state, zip, mcc, errors, Remarks)
+SELECT id, date, client_id, card_id, amount, use_chip, merchant_id, merchant_city, merchant_state, zip, mcc, errors, Remarks
+FROM transactions_data
+WHERE amount < 0;
+
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+
+SELECT use_chip, COUNT(*) AS Transaction_Count
+FROM Negative_Transactions
+GROUP BY use_chip
+ORDER BY Transaction_Count DESC;
+GO
+
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'transactions_data';
+
+GO
+
+UPDATE transactions_data
+SET id = -1
+WHERE ID IS NULL;
+
+ALTER TABLE transactions_data
+ALTER COLUMN id INT NOT NULL;
+
+ALTER TABLE transactions_data
+ADD CONSTRAINT PK_ID_transcations_data PRIMARY KEY (ID);
+
+UPDATE Negative_Transactions
+SET id = -1
+WHERE ID IS NULL;
+
+ALTER TABLE Negative_Transactions
+ALTER COLUMN id INT NOT NULL;
+
+ALTER TABLE Negative_Transactions
+ADD CONSTRAINT PK_ID_Negative_Transactions PRIMARY KEY (id);
+
+EXECUTE sp_pkeys 'transactions_data';
+EXECUTE sp_pkeys 'Negative_Transactions';
+GO
+
+
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+GO
+
+EXECUTE sp_rename 'transactions_data', 'transactions_data_raw';
+
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+
+SELECT * FROM Schema_Change_log;
+
+GO
+
+INSERT INTO Schema_Change_Log (ChangeDate, TableName, ChangeType, Description, ChangedBy)
+VALUES 
+(GETDATE(), 'transactions_data', 'RENAME_TABLE', 'Renamed transactions_data to transactions_data_raw', SUSER_NAME());
+GO
+
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'transactions_data_raw';
+
+
+
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+GO
+
+SELECT TOP 5* FROM transactions_data_raw;
+
+IF EXISTS(
+SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CalenderOfTransactions')
+BEGIN
+DROP TABLE CalenderOfTransactions;
+END
+
+IF NOT EXISTs
+(SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CalanderOfTransactions')
+BEGIN
+CREATE TABLE CalenderOfTransactions(
+id int, date datetime, client_id int, card_id int, amount decimal(10, 0), use_chip varchar(50),merchant_id int
+);
+END
+
+IF EXISTS(
+SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'CalenderOfTransactions')
+BEGIN
+TRUNCATE TABLE CalenderOfTransactions;
+END
+
+INSERT INTO CalenderOfTransactions(id, date, client_id, card_id, amount, use_chip, merchant_id)
+SELECT id, date, client_id, card_id, amount, use_chip, merchant_id
+FROM transactions_data_raw;
+
+SELECT MIN(date) AS First_Date_txn, MAX(date) AS Last_date_txn
+FROM CalenderOfTransactions;
+
+ALTER TABLE CalenderOfTransactions
+ADD
+[YEAR] AS YEAR(date),
+[Month] AS MONTH(date),
+Txn_Date AS CAST(date AS DATE),
+Txn_Time AS CAST(date AS TIME);
+
+SELECT TOP 10* FROM CalenderOfTransactions;
+
+ALTER TABLE CalenderOfTransactions
+DROP COLUMN Txn_Time;
+
+ALTER TABLE CalenderOfTransactions
+ADD Txn_Time AS CONVERT(TIME(0), date);
+
+SELECT * FROM CalenderOfTransactions;
+
+SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+GO
+SELECT TOP 10 * FROM transactions_data_raw;
+USE [FinancialTransactions];
+GO
+
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE = 'BASE TABLE'
+AND TABLE_CATALOG = 'FinancialTransactions';
+
+GO
+
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'transactions_data_raw';
+
+SELECT TOP 10* FROM transactions_data_raw;
+ALTER TABLE transactions_data_raw
+DROP COLUMN errors, Remarks, TestColumn;
